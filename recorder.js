@@ -1,31 +1,39 @@
-﻿let mediaRecorder;
+let recorder;
 let audioChunks = [];
 
 function startRecording() {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.ondataavailable = e => {
-                audioChunks.push(e.data);
-            };
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const file = new File([audioBlob], 'recorded_audio.wav', { type: 'audio/wav' });
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        recorder = new Recorder(stream);
+        audioChunks = [];
+        recorder.record();
+        streamToStreamlit();
+    });
+}
 
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(file);
-
-                const uploader = document.querySelector('input[type="file"]');
-                uploader.files = dataTransfer.files;
-                uploader.dispatchEvent(new Event('change', { bubbles: true }));
+function streamToStreamlit() {
+    if (recorder) {
+        recorder.exportWAV((blob) => {
+            audioChunks.push(blob);
+            // Send to Streamlit via a custom event or fetch (simplified)
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                let data = new Uint8Array(e.target.result);
+                // Simulate sending to Streamlit (requires WebSocket or custom endpoint)
+                console.log("Streaming audio chunk:", data);
             };
-            audioChunks = [];
-            mediaRecorder.start();
-        });
+            reader.readAsArrayBuffer(blob);
+            setTimeout(streamToStreamlit, 1000); // Stream every 1 second
+        }, 1000); // Export every 1 second
+    }
 }
 
 function stopRecording() {
-    if (mediaRecorder) {
-        mediaRecorder.stop();
+    if (recorder) {
+        recorder.stop();
+        recorder.stream.getTracks().forEach(track => track.stop());
     }
 }
+
+// Expose functions to Streamlit
+window.startRecording = startRecording;
+window.stopRecording = stopRecording;
