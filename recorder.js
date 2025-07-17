@@ -1,5 +1,4 @@
 let recorder;
-let audioChunks = [];
 
 function Recorder(stream) {
     this.stream = stream;
