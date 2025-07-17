@@ -50,7 +50,7 @@ function streamToStreamlit() {
             }).then(response => response.text()).then(data => {
                 document.getElementById('transcription').innerText = data;
             });
-            setTimeout(streamToStreamlit, 1000);
+            setTimeout(streamToStreamlit, 1000); // Stream every 1 second
         }, 1000);
     }
 }
