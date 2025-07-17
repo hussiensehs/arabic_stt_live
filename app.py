@@ -1,53 +1,102 @@
-﻿import streamlit as st
-import os
-import tempfile
-from faster_whisper import WhisperModel
+import streamlit as st
 from datetime import datetime
+import whisper
+import sounddevice as sd
+import numpy as np
+import scipy.io.wavfile as wavfile
+import os
+from io import BytesIO
 
-st.set_page_config(page_title='🎙️ Arabic Live Speech-to-Text', layout='centered')
+# Page configuration
+st.set_page_config(page_title="Arabic Speech-to-Text", page_icon="🎤", layout="centered")
 
-st.title('🎧 استمع وحوّل الكلام العربي إلى نص')
+# Title and description
+st.title("Arabic Speech-to-Text App")
+st.markdown("Record or upload audio to transcribe Arabic speech using faster-whisper.")
 
-# لتحزين الجمل المتفرغة
-if 'full_text' not in st.session_state:
-    st.session_state.full_text = ''
-
-# تحميل النموذج
+# Initialize whisper model
 @st.cache_resource
 def load_model():
-    return WhisperModel('base', compute_type='int8')
+    return whisper.load_model("base", device="cpu")  # Use 'base' model for faster-whisper
 
 model = load_model()
 
-# عرض الزر لتسجيل الصوت
-st.markdown('''
-    <script src="recorder.js"></script>
-    <button onclick="startRecording()">🎤 ابدأ التسجيل</button>
-    <button onclick="stopRecording()">🛑 إيقاف التسجيل</button>
-''', unsafe_allow_html=True)
+# Session state for audio and transcription
+if "audio_data" not in st.session_state:
+    st.session_state.audio_data = None
+if "transcription" not in st.session_state:
+    st.session_state.transcription = ""
 
-# استقبال الصوت بعد التسجيل
-audio_file = st.file_uploader('⬆️ أو ارفع ملف الصوت هنا', type=['wav', 'mp3', 'm4a'])
+# JavaScript for microphone recording (via recorder.js)
+st.markdown("""
+<script src="recorder.js"></script>
+<script>
+let recorder;
+function startRecording() {
+    navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
+        recorder = new Recorder(stream);
+        recorder.record();
+    });
+}
+function stopRecording() {
+    recorder.stop();
+    recorder.exportWAV(blob => {
+        let url = URL.createObjectURL(blob);
+        let a = document.createElement('a');
+        a.href = url;
+        a.download = 'recording.wav';
+        a.click();
+    });
+}
+</script>
+""", unsafe_allow_html=True)
 
-if audio_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-        tmp_file.write(audio_file.read())
-        tmp_path = tmp_file.name
+# Recording controls
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("🎤 ابدأ التسجيل"):
+        st.write("<button onclick='startRecording()'>Recording...</button>", unsafe_allow_html=True)
+with col2:
+    if st.button("🛑 إيقاف التسجيل"):
+        st.write("<button onclick='stopRecording()'>Processing...</button>", unsafe_allow_html=True)
+        # Assume recording.wav is saved locally by recorder.js
+        if os.path.exists("recording.wav"):
+            st.session_state.audio_data = "recording.wav"
 
-    st.info('⏳ جاري تحويل الصوت للنص...')
-    segments, _ = model.transcribe(tmp_path)
+# File uploader
+uploaded_file = st.file_uploader("Upload an audio file (.wav, .mp3, .m4a)", type=["wav", "mp3", "m4a"])
+if uploaded_file:
+    st.session_state.audio_data = uploaded_file
 
-    for segment in segments:
-        st.session_state.full_text += segment.text + ' '
+# Transcription logic
+if st.session_state.audio_data:
+    st.write("Transcribing...")
+    try:
+        if isinstance(st.session_state.audio_data, str):
+            # Load audio from file path (recorded via recorder.js)
+            audio = st.session_state.audio_data
+        else:
+            # Load audio from uploaded file
+            audio = BytesIO(st.session_state.audio_data.read())
+        result = model.transcribe(audio, language="ar")
+        st.session_state.transcription = result["text"]
+        st.write("Transcription:", st.session_state.transcription)
+    except Exception as e:
+        st.error(f"Transcription failed: {str(e)}")
 
-    st.success('✅ النص ظهر بنجاح:')
-    st.write(st.session_state.full_text)
+# Download transcription as text file
+if st.session_state.transcription:
+    filename = f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"  # Fixed f-string
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(st.session_state.transcription)
+    with open(filename, "rb") as f:
+        st.download_button(
+            label="⬇️ تحميل النص كملف",
+            data=f,
+            file_name=filename,
+            mime="text/plain"
+        )
+    os.remove(filename)  # Clean up temporary file
 
-# تحميل النص النهائي
-if st.session_state.full_text:
-    if st.button('⬇️ تحميل النص كملف'):
-        filename = f'transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt'
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(st.session_state.full_text)
-        with open(filename, 'rb') as f:
-            st.download_button('📄 اضغط لتحميل النص', f, file_name=filename)
+# Footer
+st.markdown("Built with Streamlit and faster-whisper for Arabic speech recognition.")
