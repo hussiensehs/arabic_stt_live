@@ -8,6 +8,7 @@ import librosa
 import os
 from io import BytesIO
 import time
+import base64
 
 # Page configuration
 st.set_page_config(page_title="Arabic Speech-to-Text", page_icon="🎤", layout="centered")
@@ -24,7 +25,7 @@ def load_model():
             model_size_or_path="base",
             device="cpu",
             download_root="/tmp",
-            local_files_only=False  # Allow downloading the model from Hugging Face
+            local_files_only=False
         )
     except Exception as e:
         st.error(f"فشل تحميل النموذج: {str(e)}. حاول مرة أخرى أو تحقق من الاتصال.")
@@ -35,70 +36,67 @@ model = load_model()
 # Session state
 if "transcription" not in st.session_state:
     st.session_state.transcription = ""
+if "audio_chunks" not in st.session_state:
+    st.session_state.audio_chunks = []
 
 # JavaScript for continuous recording
 st.markdown("""
 <script src="recorder.js"></script>
 <script>
 let recorder;
+let streamInterval;
+
 function startRecording() {
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         recorder = new Recorder(stream);
         recorder.record();
-        streamToStreamlit();
-    }).catch(error => console.error('Microphone access error:', error));
-}
-function streamToStreamlit() {
-    if (recorder) {
-        recorder.exportWAV(blob => {
-            let formData = new FormData();
-            formData.append('audio', blob, 'chunk.wav');
-            fetch(window.location.href, {
-                method: 'POST',
-                body: formData
-            }).then(response => response.text()).then(data => {
-                document.getElementById('transcription').innerText = data;
-            }).catch(error => console.error('Fetch error:', error));
-            setTimeout(streamToStreamlit, 1000);
+        streamInterval = setInterval(() => {
+            recorder.exportWAV(blob => {
+                let reader = new FileReader();
+                reader.onload = function(e) {
+                    let data = e.target.result.split(',')[1]; // Get base64 data
+                    document.getElementById('audio-chunk').value = data;
+                    document.getElementById('audio-form').dispatchEvent(new Event('submit'));
+                };
+                reader.readAsDataURL(blob);
+            }, 1000);
         }, 1000);
-    }
+    }).catch(error => {
+        console.error('Microphone access error:', error);
+        alert('خطأ في الوصول للميكروفون: ' + error.message);
+    });
 }
+
 function stopRecording() {
     if (recorder) {
         recorder.stop();
         recorder.stream.getTracks().forEach(track => track.stop());
+        clearInterval(streamInterval);
     }
 }
+
 window.startRecording = startRecording;
 window.stopRecording = stopRecording;
 </script>
+<form id="audio-form" style="display:none;">
+    <input type="hidden" id="audio-chunk" name="audio_chunk">
+</form>
 <div id="transcription"></div>
 """, unsafe_allow_html=True)
 
-# Handle audio stream
-if model is not None:
+# Handle audio chunk submission
+if "audio_chunk" in st.form_submit_data and model is not None:
     try:
-        import streamlit.server.server as server
-        from streamlit.runtime.scriptrunner import get_script_run_ctx
-
-        @st.experimental_singleton
-        def get_server():
-            ctx = get_script_run_ctx()
-            return ctx.server if ctx else server.Server.get_current()
-
-        server = get_server()
-
-        @server.route('/stream', methods=['POST'])
-        def handle_audio_stream():
-            import flask
-            file = flask.request.files['audio']
-            audio = pydub.AudioSegment.from_file(file)
-            audio = audio.set_channels(1).set_frame_rate(16000)
-            audio_data = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
-            result, _ = model.transcribe(audio_data, language="ar")
-            transcription = "".join(segment.text for segment in result)
-            st.session_state.transcription += transcription + " "
-            return transcription
+        # Decode base64 audio data
+        audio_data = base64.b64decode(st.form_submit_data["audio_chunk"])
+        audio = pydub.AudioSegment.from_file(BytesIO(audio_data))
+        audio = audio.set_channels(1).set_frame_rate(16000)
+        audio_data = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
+        result, _ = model.transcribe(audio_data, language="ar")
+        transcription = "".join(segment.text for segment in result)
+        st.session_state.transcription += transcription + " "
+        st.session_state.audio_chunks.append(transcription)
+        st.write("<script>document.getElementById('transcription').innerText = '" + st.session_state.transcription.replace("'", "\\'") + "';</script>", unsafe_allow_html=True)
     except Exception as e:
         st.error(f"فشل معالجة التسجيل: {str(e)}")
 
