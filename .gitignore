@@ -1,0 +1,21 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env wond/
+venv/
+ENV/
+*.wav
+*.mp3
+*.m4a
+*.log
+
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/*.db
+
+# System files
+.DS_Store
+Thumbs.db
