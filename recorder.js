@@ -12,7 +12,7 @@ function startRecording() {
 
 function streamToStreamlit() {
     if (recorder) {
-        recorder.exportWAV((blob) => {
+        recorder.exportWAV(blob => {
             audioChunks.push(blob);
             // Send to Streamlit via a custom event or fetch (simplified)
             let reader = new FileReader();
