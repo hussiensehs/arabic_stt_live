@@ -20,7 +20,12 @@ st.markdown("يتسجل الكلام مباشرة ويكتب النص فوراً
 @st.cache_resource
 def load_model():
     try:
-        return faster_whisper.WhisperModel("base", device="cpu", download_root="/tmp")
+        return faster_whisper.WhisperModel(
+            model_size_or_path="base",
+            device="cpu",
+            download_root="/tmp",
+            local_files_only=False  # Allow downloading the model from Hugging Face
+        )
     except Exception as e:
         st.error(f"فشل تحميل النموذج: {str(e)}. حاول مرة أخرى أو تحقق من الاتصال.")
         return None
@@ -41,7 +46,7 @@ function startRecording() {
         recorder = new Recorder(stream);
         recorder.record();
         streamToStreamlit();
-    });
+    }).catch(error => console.error('Microphone access error:', error));
 }
 function streamToStreamlit() {
     if (recorder) {
@@ -54,7 +59,7 @@ function streamToStreamlit() {
             }).then(response => response.text()).then(data => {
                 document.getElementById('transcription').innerText = data;
             }).catch(error => console.error('Fetch error:', error));
-            setTimeout(streamToStreamlit, 1000); // Stream every 1 second
+            setTimeout(streamToStreamlit, 1000);
         }, 1000);
     }
 }
@@ -71,7 +76,7 @@ window.stopRecording = stopRecording;
 """, unsafe_allow_html=True)
 
 # Handle audio stream
-if model is not None:  # Simplified check instead of _is_running_with_streamlit
+if model is not None:
     try:
         import streamlit.server.server as server
         from streamlit.runtime.scriptrunner import get_script_run_ctx
@@ -89,10 +94,10 @@ if model is not None:  # Simplified check instead of _is_running_with_streamlit
             file = flask.request.files['audio']
             audio = pydub.AudioSegment.from_file(file)
             audio = audio.set_channels(1).set_frame_rate(16000)
-            audio_data = np.array(audio.get_array_of_samples())
+            audio_data = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
             result, _ = model.transcribe(audio_data, language="ar")
             transcription = "".join(segment.text for segment in result)
-            st.session_state.transcription += transcription
+            st.session_state.transcription += transcription + " "
             return transcription
     except Exception as e:
         st.error(f"فشل معالجة التسجيل: {str(e)}")
@@ -122,3 +127,6 @@ if st.session_state.transcription:
             mime="text/plain"
         )
     os.remove(filename)
+
+# Footer
+st.markdown("Built with Streamlit and faster-whisper for Arabic speech recognition.")
