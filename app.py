@@ -53,7 +53,7 @@ function streamToStreamlit() {
                 body: formData
             }).then(response => response.text()).then(data => {
                 document.getElementById('transcription').innerText = data;
-            });
+            }).catch(error => console.error('Fetch error:', error));
             setTimeout(streamToStreamlit, 1000); // Stream every 1 second
         }, 1000);
     }
@@ -71,28 +71,31 @@ window.stopRecording = stopRecording;
 """, unsafe_allow_html=True)
 
 # Handle audio stream
-if st._is_running_with_streamlit and model is not None:
-    import streamlit.server.server as server
-    from streamlit.runtime.scriptrunner import get_script_run_ctx
+if model is not None:  # Simplified check instead of _is_running_with_streamlit
+    try:
+        import streamlit.server.server as server
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
 
-    @st.experimental_singleton
-    def get_server():
-        ctx = get_script_run_ctx()
-        return ctx.server if ctx else server.Server.get_current()
+        @st.experimental_singleton
+        def get_server():
+            ctx = get_script_run_ctx()
+            return ctx.server if ctx else server.Server.get_current()
 
-    server = get_server()
+        server = get_server()
 
-    @server.route('/stream', methods=['POST'])
-    def handle_audio_stream():
-        import flask
-        file = flask.request.files['audio']
-        audio = pydub.AudioSegment.from_file(file)
-        audio = audio.set_channels(1).set_frame_rate(16000)
-        audio_data = np.array(audio.get_array_of_samples())
-        result, _ = model.transcribe(audio_data, language="ar")
-        transcription = "".join(segment.text for segment in result)
-        st.session_state.transcription += transcription
-        return transcription
+        @server.route('/stream', methods=['POST'])
+        def handle_audio_stream():
+            import flask
+            file = flask.request.files['audio']
+            audio = pydub.AudioSegment.from_file(file)
+            audio = audio.set_channels(1).set_frame_rate(16000)
+            audio_data = np.array(audio.get_array_of_samples())
+            result, _ = model.transcribe(audio_data, language="ar")
+            transcription = "".join(segment.text for segment in result)
+            st.session_state.transcription += transcription
+            return transcription
+    except Exception as e:
+        st.error(f"فشل معالجة التسجيل: {str(e)}")
 
 # Recording controls
 col1, col2 = st.columns(2)
