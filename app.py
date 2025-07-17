@@ -16,10 +16,14 @@ st.set_page_config(page_title="Arabic Speech-to-Text", page_icon="🎤", layout=
 st.title("Arabic Speech-to-Text App")
 st.markdown("يتسجل الكلام مباشرة ويكتب النص فوراً باستخدام faster-whisper.")
 
-# Initialize faster-whisper model
+# Initialize faster-whisper model with error handling
 @st.cache_resource
 def load_model():
-    return faster_whisper.WhisperModel("base", device="cpu")
+    try:
+        return faster_whisper.WhisperModel("base", device="cpu", download_root="/tmp")
+    except Exception as e:
+        st.error(f"فشل تحميل النموذج: {str(e)}. حاول مرة أخرى أو تحقق من الاتصال.")
+        return None
 
 model = load_model()
 
@@ -67,7 +71,7 @@ window.stopRecording = stopRecording;
 """, unsafe_allow_html=True)
 
 # Handle audio stream
-if st._is_running_with_streamlit:
+if st._is_running_with_streamlit and model is not None:
     import streamlit.server.server as server
     from streamlit.runtime.scriptrunner import get_script_run_ctx
 
@@ -93,7 +97,7 @@ if st._is_running_with_streamlit:
 # Recording controls
 col1, col2 = st.columns(2)
 with col1:
-    if st.button("🎤 ابدأ التسجيل"):
+    if st.button("🎤 ابدأ التسجيل") and model is not None:
         st.write("<script>startRecording();</script>", unsafe_allow_html=True)
 with col2:
     if st.button("🛑 إيقاف التسجيل"):
