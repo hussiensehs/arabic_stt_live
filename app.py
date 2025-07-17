@@ -7,98 +7,104 @@ import pydub
 import librosa
 import os
 from io import BytesIO
+import time
 
 # Page configuration
 st.set_page_config(page_title="Arabic Speech-to-Text", page_icon="🎤", layout="centered")
 
 # Title and description
 st.title("Arabic Speech-to-Text App")
-st.markdown("Record or upload audio to transcribe Arabic speech using faster-whisper.")
+st.markdown("يتسجل الكلام مباشرة ويكتب النص فوراً باستخدام faster-whisper.")
 
 # Initialize faster-whisper model
 @st.cache_resource
 def load_model():
-    return faster_whisper.WhisperModel("base", device="cpu")  # Use 'base' model for faster-whisper
+    return faster_whisper.WhisperModel("base", device="cpu")
 
 model = load_model()
 
-# Session state for audio and transcription
-if "audio_data" not in st.session_state:
-    st.session_state.audio_data = None
+# Session state
 if "transcription" not in st.session_state:
     st.session_state.transcription = ""
 
-# JavaScript for microphone recording (via recorder.js)
+# JavaScript for continuous recording
 st.markdown("""
 <script src="recorder.js"></script>
 <script>
 let recorder;
 function startRecording() {
-    navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         recorder = new Recorder(stream);
         recorder.record();
+        streamToStreamlit();
     });
+}
+function streamToStreamlit() {
+    if (recorder) {
+        recorder.exportWAV(blob => {
+            let formData = new FormData();
+            formData.append('audio', blob, 'chunk.wav');
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            }).then(response => response.text()).then(data => {
+                document.getElementById('transcription').innerText = data;
+            });
+            setTimeout(streamToStreamlit, 1000);
+        }, 1000);
+    }
 }
 function stopRecording() {
-    recorder.stop();
-    recorder.exportWAV(blob => {
-        let url = URL.createObjectURL(blob);
-        let a = document.createElement('a');
-        a.href = url;
-        a.download = 'recording.wav';
-        a.click();
-    });
+    if (recorder) {
+        recorder.stop();
+        recorder.stream.getTracks().forEach(track => track.stop());
+    }
 }
+window.startRecording = startRecording;
+window.stopRecording = stopRecording;
 </script>
+<div id="transcription"></div>
 """, unsafe_allow_html=True)
+
+# Handle audio stream
+if st._is_running_with_streamlit:
+    import streamlit.server.server as server
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+    @st.experimental_singleton
+    def get_server():
+        ctx = get_script_run_ctx()
+        return ctx.server if ctx else server.Server.get_current()
+
+    server = get_server()
+
+    @server.route('/stream', methods=['POST'])
+    def handle_audio_stream():
+        import flask
+        file = flask.request.files['audio']
+        audio = pydub.AudioSegment.from_file(file)
+        audio = audio.set_channels(1).set_frame_rate(16000)
+        audio_data = np.array(audio.get_array_of_samples())
+        result, _ = model.transcribe(audio_data, language="ar")
+        transcription = "".join(segment.text for segment in result)
+        st.session_state.transcription += transcription
+        return transcription
 
 # Recording controls
 col1, col2 = st.columns(2)
 with col1:
     if st.button("🎤 ابدأ التسجيل"):
-        st.write("<button onclick='startRecording()'>Recording...</button>", unsafe_allow_html=True)
+        st.write("<script>startRecording();</script>", unsafe_allow_html=True)
 with col2:
     if st.button("🛑 إيقاف التسجيل"):
-        st.write("<button onclick='stopRecording()'>Processing...</button>", unsafe_allow_html=True)
-        # Assume recording.wav is saved locally by recorder.js
-        if os.path.exists("recording.wav"):
-            st.session_state.audio_data = "recording.wav"
+        st.write("<script>stopRecording();</script>", unsafe_allow_html=True)
 
-# File uploader
-uploaded_file = st.file_uploader("Upload an audio file (.wav, .mp3, .m4a)", type=["wav", "mp3", "m4a"])
-if uploaded_file:
-    # Convert uploaded file to wav for faster-whisper
-    audio = pydub.AudioSegment.from_file(uploaded_file)
-    audio = audio.set_channels(1).set_frame_rate(16000)  # Standardize for whisper
-    st.session_state.audio_data = BytesIO()
-    audio.export(st.session_state.audio_data, format="wav")
+# Display transcription
+st.write("النص المحول:", st.session_state.transcription)
 
-# Transcription logic
-if st.session_state.audio_data:
-    st.write("Transcribing...")
-    try:
-        if isinstance(st.session_state.audio_data, str):
-            # Load audio from file path (recorded via recorder.js)
-            audio_data, sample_rate = sf.read(st.session_state.audio_data)
-        else:
-            # Load audio from uploaded file (BytesIO)
-            audio_data, sample_rate = sf.read(st.session_state.audio_data)
-        # Ensure mono audio and 16kHz sample rate
-        if len(audio_data.shape) > 1:
-            audio_data = np.mean(audio_data, axis=1)
-        if sample_rate != 16000:
-            st.warning("Resampling audio to 16kHz for transcription.")
-            audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
-        result, _ = model.transcribe(audio_data, language="ar")
-        transcription = "".join(segment.text for segment in result)
-        st.session_state.transcription = transcription
-        st.write("Transcription:", st.session_state.transcription)
-    except Exception as e:
-        st.error(f"Transcription failed: {str(e)}")
-
-# Download transcription as text file
+# Download transcription
 if st.session_state.transcription:
-    filename = f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"  # Fixed f-string
+    filename = f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(st.session_state.transcription)
     with open(filename, "rb") as f:
@@ -108,7 +114,4 @@ if st.session_state.transcription:
             file_name=filename,
             mime="text/plain"
         )
-    os.remove(filename)  # Clean up temporary file
-
-# Footer
-st.markdown("Built with Streamlit and faster-whisper for Arabic speech recognition.")
+    os.remove(filename)
