@@ -10,7 +10,7 @@ from io import BytesIO
 import livekit
 import logging
 import asyncio
-from livekit import AccessToken, VideoGrant
+from livekit.rtc import AccessToken, VideoGrant  # Correct import for livekit==0.12.1
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -140,7 +140,7 @@ async def process_audio():
             await room.connect(LIVEKIT_URL, st.session_state.livekit_token)
             logger.info("Connected to LiveKit room")
             async for event in room.events():
-                if isinstance(event, livekit.AudioFrameEvent):
+                if isinstance(event, livekit.rtc.AudioFrameEvent):  # Updated for livekit==0.12.1
                     logger.info("Received audio frame")
                     st.write("تلقي إطار صوتي")  # Debug: confirm frame received
                     audio = pydub.AudioSegment(
