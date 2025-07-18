@@ -9,7 +9,7 @@ from faster_whisper import WhisperModel
 from typing import Optional
 import nest_asyncio
 
-# تطبيق إصلاح لتعارض asyncio مع Streamlit
+# حل مشكلة asyncio داخل Streamlit
 nest_asyncio.apply()
 
 # إعداد واجهة Streamlit
@@ -64,7 +64,7 @@ def generate_livekit_token(identity: str = "streamlit-user"):
         ttl=3600
     )
 
-# معالجة وتحويل الصوت إلى نص
+# تحويل الصوت إلى نص
 def transcribe_audio(audio_data: np.ndarray, sample_rate: int) -> str:
     try:
         segments, _ = model.transcribe(
@@ -77,7 +77,7 @@ def transcribe_audio(audio_data: np.ndarray, sample_rate: int) -> str:
     except Exception as e:
         return f"⚠️ خطأ: {str(e)}"
 
-# إدارة جلسة LiveKit (المعدلة)
+# إدارة الجلسة
 class LiveKitSession:
     def __init__(self):
         self.room: Optional[Room] = None
@@ -93,7 +93,7 @@ class LiveKitSession:
                 token,
                 RoomOptions(auto_subscribe=True)
             )
-            
+
             @self.room.on("track_subscribed")
             async def on_track_subscribed(track, publication, participant):
                 if track.kind != "audio":
@@ -103,27 +103,23 @@ class LiveKitSession:
                 async def on_audio_frame(frame: AudioFrame):
                     if not self.is_running:
                         return
-                    
                     try:
-                        # تحويل AudioFrame إلى numpy array
+                        if not frame.data:
+                            return
                         audio_np = np.frombuffer(frame.data, dtype=np.int16).astype(np.float32) / 32768.0
                         
-                        # إعادة العينة إذا لزم الأمر
+                        if frame.num_channels > 1:
+                            audio_np = audio_np.reshape(-1, frame.num_channels).mean(axis=1)
+
                         if frame.sample_rate != 16000:
-                            audio_np = librosa.resample(
-                                audio_np,
-                                orig_sr=frame.sample_rate,
-                                target_sr=16000
-                            )
-                        
-                        # التحويل إلى نص
+                            audio_np = librosa.resample(audio_np, orig_sr=frame.sample_rate, target_sr=16000)
+
                         text = transcribe_audio(audio_np, 16000)
                         self.update_transcription(text)
                     except Exception as e:
-                        st.warning(f"خطأ في معالجة الإطار الصوتي: {str(e)}")
+                        st.warning(f"خطأ في معالجة الصوت: {str(e)}")
 
             st.success("تم الاتصال بنجاح، ابدأ بالتحدث...")
-            
         except Exception as e:
             st.error(f"فشل الاتصال: {str(e)}")
             self.is_running = False
@@ -150,41 +146,40 @@ class LiveKitSession:
 # الواجهة الرئيسية
 def main():
     session = LiveKitSession()
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.header("الإعدادات")
         st.info("""
         <div class="rtl">
-        - تأكد من السماح باستخدام الميكروفون في المتصفح
-        - جودة التحويل تعتمد على وضوح الصوت
+        - تأكد من السماح باستخدام الميكروفون في المتصفح<br>
+        - جودة التحويل تعتمد على وضوح الصوت والإنترنت
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.header("التحكم")
-        
         if st.button("▶️ بدء البث المباشر", type="primary"):
             with st.spinner("جاري الاتصال بغرفة LiveKit..."):
                 asyncio.get_event_loop().run_until_complete(session.start())
-                
+
         if st.button("⏹️ إيقاف البث"):
             asyncio.get_event_loop().run_until_complete(session.stop())
 
-    # قسم لتحميل الملفات الصوتية
+    # رفع ملف صوتي
     st.divider()
     uploaded_file = st.file_uploader("تحميل ملف صوتي", type=["wav", "mp3"])
-    
+
     if uploaded_file:
         st.audio(uploaded_file)
-        
+
         if st.button("تحويل الملف"):
             with st.spinner("جاري معالجة الملف..."):
                 try:
                     audio_data, sample_rate = librosa.load(uploaded_file, sr=16000)
                     text = transcribe_audio(audio_data, sample_rate)
-                    
+
                     st.markdown(f"""
                     <div class="rtl" style="margin-top: 20px;">
                         <h3>نتيجة التحويل:</h3>
