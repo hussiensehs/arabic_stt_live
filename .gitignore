@@ -1,10 +1,11 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
+*.py[cod]
+*.so
+.Python
+env/
 venv/
+*.env
 *.wav
 *.mp3
 *.log
@@ -13,9 +14,9 @@ venv/
 .streamlit/secrets.toml
 .streamlit/*.db
 
+# Models
+whisper_models/
+
 # System
 .DS_Store
 Thumbs.db
-
-# Audio cache
-*.tmp
