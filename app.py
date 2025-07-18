@@ -124,9 +124,10 @@ window.stopRecording = stopRecording;
 # Set LiveKit token in session state and update DOM
 if st.session_state.recording and not st.session_state.livekit_token:
     st.session_state.livekit_token = generate_token()
+    escaped_token = st.session_state.livekit_token.replace("'", "\\'")
     st.markdown(f"""
     <script>
-    document.getElementById('livekit-token').value = '{st.session_state.livekit_token.replace("'", "\\'")}';
+    document.getElementById('livekit-token').value = '{escaped_token}';
     </script>
     """, unsafe_allow_html=True)
 
