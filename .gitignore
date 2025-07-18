@@ -1,21 +1,21 @@
-﻿# Python
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env wond/
+.env
 venv/
-ENV/
 *.wav
 *.mp3
-*.m4a
 *.log
 
 # Streamlit
 .streamlit/secrets.toml
 .streamlit/*.db
 
-# System files
+# System
 .DS_Store
 Thumbs.db
+
+# Audio cache
+*.tmp
