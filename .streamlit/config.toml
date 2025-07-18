@@ -4,7 +4,7 @@ enableCORS = false
 enableXsrfProtection = false
 
 [client]
-showErrorDetails = true  # تغيير من false إلى true
+showErrorDetails = true
 
 [theme]
 base = "light"
