@@ -1,4 +1,0 @@
-typing-extensions==4.8.0
-markdown-it-py==2.2.0
-rich==13.7.0
-Pygments==2.15.1
