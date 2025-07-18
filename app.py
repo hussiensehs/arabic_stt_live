@@ -1,135 +1,78 @@
 import streamlit as st
-from datetime import datetime
 from faster_whisper import WhisperModel
+import asyncio
+from livekit import rtc
 import soundfile as sf
 import numpy as np
-from pydub import AudioSegment
+import tempfile
 import os
-import logging
-import asyncio
-import json
+from pydub import AudioSegment
 
-from livekit_server_sdk import AccessToken, VideoGrant  # ✅ التعديل هنا
+# ⬇️ إعدادات الاتصال بـ LiveKit
+LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "wss://stt-arabic-jbyb69nd.livekit.cloud")
+LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "APIR2NRVYgdadun")
+LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "vI1P58EouVNhTe3U0KpTSy1ffBnH9k2D91fJRcJhl6jA")
 
-# --- Logging setup ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ⬇️ إعداد واجهة Streamlit
+st.set_page_config(page_title="Arabic STT Live", layout="wide")
+st.title("🎤 Live Arabic Speech-to-Text")
 
-# --- Streamlit setup ---
-st.set_page_config(page_title="Arabic Speech-to-Text", page_icon="🎤", layout="centered")
-st.title("Arabic Speech-to-Text App")
-st.markdown("🎙️ يتم تسجيل الصوت وتحويله إلى نص مباشرة باستخدام faster-whisper و LiveKit")
+# زر بدء البث
+start = st.button("🔴 Start Live Recording")
 
-# --- Model caching ---
+# خانة لعرض النص المباشر
+live_text = st.empty()
+
+# تحميل نموذج faster-whisper
 @st.cache_resource
 def load_model():
-    try:
-        model = WhisperModel("tiny", device="cpu", download_root="/tmp")
-        return model
-    except Exception as e:
-        st.error(f"فشل تحميل النموذج: {e}")
-        return None
+    return WhisperModel("base", compute_type="int8")
 
 model = load_model()
 
-# --- Session defaults ---
-st.session_state.setdefault("transcription", "")
-st.session_state.setdefault("recording", False)
-st.session_state.setdefault("mic_status", "غير متصل")
-st.session_state.setdefault("livekit_token", "")
+# تحويل الصوت إلى نص
+def transcribe(audio_path):
+    segments, _ = model.transcribe(audio_path, language="ar")
+    full_text = ""
+    for seg in segments:
+        full_text += seg.text + " "
+    return full_text.strip()
 
-# --- Secrets ---
-LIVEKIT_URL = st.secrets.get("LIVEKIT_URL")
-LIVEKIT_API_KEY = st.secrets.get("LIVEKIT_API_KEY")
-LIVEKIT_API_SECRET = st.secrets.get("LIVEKIT_API_SECRET")
+# استقبال صوت من LiveKit
+async def receive_audio_and_transcribe():
+    room = rtc.Room()
+    await room.connect(LIVEKIT_URL, rtc.AccessToken(
+        LIVEKIT_API_KEY,
+        LIVEKIT_API_SECRET,
+        identity="streamlit-client"
+    ).to_jwt())
 
-# --- Generate JWT token ---
-def generate_token():
-    try:
-        identity = f"user-{datetime.now().timestamp()}"
-        token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, identity=identity)
-        grant = VideoGrant(room="arabic-stt-room")
-        token.add_grant(grant)
-        return token.to_jwt()
-    except Exception as e:
-        st.error(f"فشل إنشاء رمز LiveKit: {e}")
-        return ""
+    # استخدم هذه الخانة لحفظ الصوت مؤقتًا
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+        audio_path = temp_audio.name
 
-# --- Inject JS Client ---
-if st.session_state.recording and not st.session_state.livekit_token:
-    st.session_state.livekit_token = generate_token()
-    escaped_token = json.dumps(st.session_state.livekit_token)
-    st.markdown(f"""
-    <script>
-    document.getElementById('livekit-token').value = {escaped_token};
-    startRecording();
-    </script>
-    """, unsafe_allow_html=True)
+    audio_chunks = []
 
-# --- Inject JavaScript for LiveKit client ---
-st.markdown("""
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@1.12.2/dist/livekit-client.min.js"></script>
-<script>
-let room;
-async function startRecording() {
-    const token = document.getElementById('livekit-token').value;
-    if (!token) {
-        document.getElementById('mic-status').innerText = '⚠️ لا يوجد رمز';
-        return;
-    }
-    try {
-        room = new LivekitClient.Room();
-        await room.connect('""" + LIVEKIT_URL + """', token);
-        const track = await LivekitClient.createLocalAudioTrack();
-        await room.localParticipant.publishTrack(track);
-        document.getElementById('mic-status').innerText = '🎤 الميكروفون متصل';
-    } catch (err) {
-        alert('فشل الاتصال بـ LiveKit: ' + err.message);
-    }
-}
-async function stopRecording() {
-    if (room) {
-        await room.disconnect();
-        document.getElementById('mic-status').innerText = '🛑 الميكروفون غير متصل';
-    }
-}
-window.startRecording = startRecording;
-window.stopRecording = stopRecording;
-</script>
-<input type="hidden" id="livekit-token" value="">
-<div id="mic-status">غير متصل</div>
-""", unsafe_allow_html=True)
+    @room.on("track_subscribed")
+    async def on_track(track, publication, participant):
+        if track.kind == "audio":
+            async for frame in track:
+                # افترض أن `frame` يحتوي على PCM raw audio
+                audio_chunks.append(frame.data)
 
-# --- Audio Upload (manual) ---
-uploaded = st.file_uploader("📤 أو اختر ملف صوتي", type=["wav", "mp3", "m4a"])
-if uploaded:
-    audio = AudioSegment.from_file(uploaded).set_channels(1).set_frame_rate(16000)
-    audio_data = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
-    segments, _ = model.transcribe(audio_data, language="ar")
-    st.session_state.transcription += "".join(seg.text for seg in segments) + " "
-    st.experimental_rerun()
+                # بعد تجميع 2 ثانية صوت، حللها
+                if len(audio_chunks) >= 20:
+                    data = b"".join(audio_chunks)
+                    audio = AudioSegment(data, sample_width=2, frame_rate=16000, channels=1)
+                    audio.export(audio_path, format="wav")
 
-# --- Recording Buttons ---
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("🎙️ ابدأ التسجيل"):
-        st.session_state.recording = True
-        st.session_state.livekit_token = generate_token()
-with col2:
-    if st.button("🛑 إيقاف التسجيل"):
-        st.session_state.recording = False
-        st.session_state.livekit_token = ""
-        st.markdown("<script>stopRecording();</script>", unsafe_allow_html=True)
+                    # تحليل الصوت وعرض النص
+                    text = transcribe(audio_path)
+                    live_text.markdown(f"📝 **Transcription:** {text}")
+                    audio_chunks.clear()
 
-# --- Transcription Output ---
-st.markdown("## 📝 النص المحول")
-st.write(st.session_state.transcription)
+    await room.join()
 
-# --- Download Transcript ---
-if st.session_state.transcription:
-    filename = f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    st.download_button("⬇️ تحميل النص", data=st.session_state.transcription, file_name=filename, mime="text/plain")
-
-# --- Footer ---
-st.markdown("---")
-st.markdown("تم التطوير باستخدام Streamlit و Faster-Whisper و LiveKit 🎧")
+if start:
+    st.warning("🎙️ Listening... Speak Arabic clearly into your mic.")
+    asyncio.run(receive_audio_and_transcribe())
