@@ -10,3 +10,4 @@ livekit==0.12.1
 av==10.0.0
 typing-extensions==4.8.0
 rich==13.7.0
+python-dotenv==1.0.0
