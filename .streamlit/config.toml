@@ -1,13 +1,10 @@
 [server]
+port = 8501
 enableCORS = false
 enableXsrfProtection = false
-port = 8501
 
 [client]
-showErrorDetails = false
-
-[logger]
-level = "info"
+showErrorDetails = true  # تغيير من false إلى true
 
 [theme]
 base = "light"
