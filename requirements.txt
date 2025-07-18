@@ -10,4 +10,5 @@ livekit==0.12.1
 av==10.0.0
 typing-extensions==4.8.0
 rich==13.7.0
-python-dotenv==1.0.0
+markdown-it-py==2.2.0
+Pygments==2.15.1
